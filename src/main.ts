@@ -1,6 +1,7 @@
 import './style.css';
 import { createEngine, GameLoop, type Engine, type GameMode, type ModeEvents } from './engine/Engine.ts';
 import * as Storage from './engine/Storage.ts';
+import { cloud, type LeaderboardRow } from './engine/Cloud.ts';
 import { SKINS, type ModeId, type Settings } from './types.ts';
 import { MODE_META, TUTORIALS } from './ui/tutorials.ts';
 import { PLAYER_SCHEMES } from './modes/partyShared.ts';
@@ -135,18 +136,49 @@ let latestScore = 0;
 let latestScoreLabel: string | undefined;
 let toastTimer = 0;
 let objectiveTimer = 0;
+let settingsSyncTimer = 0;
 let lastGameOver = { score: 0, label: undefined as string | undefined, isHighScore: false };
+let activeScreen: ScreenName = 'main';
+let playerNickname: string | null = null;
+const cloudLeaderboardCache: Partial<Record<ModeId, LeaderboardRow[] | null>> = {};
+let leaderboardRequestToken = 0;
 
-function refreshUnlocks(): Set<string> {
+function bestLocalScore(): number {
   const board = Storage.loadLeaderboard();
   let best = 0;
   for (const key of Object.keys(board)) {
     for (const e of board[key]) best = Math.max(best, e.score);
   }
+  return best;
+}
+
+function refreshUnlocks(): Set<string> {
+  const best = bestLocalScore();
   const u = Storage.loadUnlocks();
   for (const skin of SKINS) if (best >= skin.unlockScore) u.add(skin.id);
   Storage.saveUnlocks(u);
   return u;
+}
+
+/** Best-effort cloud follow-up: folds in the player's own cloud scores (so unlocks
+ *  carry across devices) and pushes any newly-unlocked skins back up. Never blocks UI. */
+async function refreshUnlocksCloud(): Promise<void> {
+  const cloudBests = await cloud.fetchMyBestScores();
+  let best = bestLocalScore();
+  for (const v of Object.values(cloudBests)) best = Math.max(best, v);
+  const u = Storage.loadUnlocks();
+  let changed = false;
+  for (const skin of SKINS) {
+    if (best >= skin.unlockScore && !u.has(skin.id)) {
+      u.add(skin.id);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  Storage.saveUnlocks(u);
+  unlocks = u;
+  void cloud.updateProfile({ unlocked_skins: Array.from(u) });
+  if (activeScreen === 'skins') screenEl.innerHTML = renderScreen('skins');
 }
 
 function toast(msg: string): void {
@@ -186,8 +218,19 @@ function closeOverlay(): void {
 }
 
 function showScreen(name: ScreenName): void {
+  activeScreen = name;
   openOverlay();
   screenEl.innerHTML = renderScreen(name);
+  if (name === 'leaderboard') loadCloudLeaderboard();
+}
+
+async function loadCloudLeaderboard(): Promise<void> {
+  const token = ++leaderboardRequestToken;
+  const tab = lbTab;
+  const rows = await cloud.fetchLeaderboard(tab, 10);
+  if (token !== leaderboardRequestToken) return; // superseded by a newer request
+  cloudLeaderboardCache[tab] = rows;
+  if (activeScreen === 'leaderboard' && lbTab === tab) screenEl.innerHTML = renderScreen('leaderboard');
 }
 
 function renderScreen(name: ScreenName): string {
@@ -317,6 +360,7 @@ function settingsScreen(): string {
       <span>Reduced motion</span>
       <button class="switch ${settings.reducedMotion ? 'on' : ''}" data-action="toggle" data-value="reducedMotion"></button>
     </div>
+    <div class="subtitle" style="margin-top:14px">${playerNickname ? `☁ Synced as ${escapeHtml(playerNickname)}` : '☁ Playing offline — scores stay on this device'}</div>
   `;
 }
 
@@ -328,19 +372,39 @@ function guessLabel(id: ModeId): string {
   return '';
 }
 
-function leaderboardScreen(): string {
+function localLeaderboardRows(): string {
   const board = Storage.loadLeaderboard();
-  const tabs = MODE_ORDER.map((id) => `<button class="lb-tab ${id === lbTab ? 'active' : ''}" data-action="lb-tab" data-value="${id}">${MODE_META[id].title}</button>`).join('');
   const list = (board[lbTab] ?? []).slice(0, 10);
-  const rows = list.length
+  return list.length
     ? list.map((e, i) => `<div class="lb-row"><span class="rank">#${i + 1}</span><span>${formatScore(e.score, guessLabel(lbTab))}</span><span>${new Date(e.date).toLocaleDateString()}</span></div>`).join('')
     : `<div class="subtitle">No runs yet — go fly!</div>`;
+}
+
+function leaderboardScreen(): string {
+  const tabs = MODE_ORDER.map((id) => `<button class="lb-tab ${id === lbTab ? 'active' : ''}" data-action="lb-tab" data-value="${id}">${MODE_META[id].title}</button>`).join('');
+  const cloudRows = cloudLeaderboardCache[lbTab];
+  let rows: string;
+  let hint = '';
+  if (cloudRows === undefined) {
+    rows = localLeaderboardRows();
+    hint = '<div class="subtitle" style="margin-bottom:8px">Loading global scores…</div>';
+  } else if (cloudRows === null) {
+    rows = localLeaderboardRows();
+    hint = '<div class="subtitle" style="margin-bottom:8px">Offline — showing scores from this device</div>';
+  } else if (cloudRows.length === 0) {
+    rows = `<div class="subtitle">No runs yet — go fly!</div>`;
+  } else {
+    rows = cloudRows
+      .map((e, i) => `<div class="lb-row"><span class="rank">#${i + 1}</span><span>${escapeHtml(e.nickname)}</span><span>${formatScore(e.score, guessLabel(lbTab))}</span></div>`)
+      .join('');
+  }
   return `
     <div class="top-nav">
       <button class="back" data-action="goto" data-value="main">←</button>
       <h2>Leaderboard</h2>
     </div>
     <div class="lb-tabs">${tabs}</div>
+    ${hint}
     ${rows}
   `;
 }
@@ -448,6 +512,10 @@ function endRun(score: number): void {
   const { isHighScore } = Storage.submitScore(modeId, score);
   unlocks = refreshUnlocks();
   lastGameOver = { score, label: latestScoreLabel, isHighScore };
+  void cloud.submitScore(modeId, score).then(() => {
+    void refreshUnlocksCloud();
+    delete cloudLeaderboardCache[modeId]; // force a fresh fetch next time this tab is opened
+  });
   window.setTimeout(() => showScreen('gameover'), modeId === 'normal' ? 500 : 150);
 }
 
@@ -500,6 +568,7 @@ overlay.addEventListener('click', (e) => {
       (settings[key] as boolean) = !settings[key];
       Storage.saveSettings(settings);
       if (key === 'muted') engine.audio.setMuted(settings.muted);
+      void cloud.updateProfile({ settings });
       showScreen('settings');
       break;
     }
@@ -507,6 +576,7 @@ overlay.addEventListener('click', (e) => {
       skinId = value!;
       engine.skinId = skinId;
       Storage.saveSelectedSkin(skinId);
+      void cloud.updateProfile({ skin_id: skinId });
       showScreen('skins');
       break;
     case 'lb-tab':
@@ -553,6 +623,8 @@ overlay.addEventListener('input', (e) => {
   Storage.saveSettings(settings);
   const label = target.parentElement?.querySelector('label span:last-child');
   if (label) label.textContent = field === 'sensitivity' ? `${v.toFixed(2)}x` : `${Math.round(v * 100)}%`;
+  window.clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = window.setTimeout(() => void cloud.updateProfile({ settings }), 600);
 });
 
 pauseBtn.addEventListener('click', togglePause);
@@ -575,3 +647,36 @@ engine.audio.setVolume(settings.volume);
 engine.audio.setMuted(settings.muted);
 
 showScreen('main');
+
+// cloud reconciliation: never blocks first paint — local state is already
+// live above. When (if) it resolves, cloud values win for cross-device sync.
+cloud.ready.then((profile) => {
+  if (!profile) return;
+  playerNickname = profile.nickname;
+  let changed = false;
+
+  if (profile.unlocked_skins?.length) {
+    const merged = new Set([...unlocks, ...profile.unlocked_skins]);
+    if (merged.size !== unlocks.size) changed = true;
+    unlocks = merged;
+    Storage.saveUnlocks(unlocks);
+  }
+  if (profile.skin_id && profile.skin_id !== skinId && unlocks.has(profile.skin_id)) {
+    skinId = profile.skin_id;
+    engine.skinId = skinId;
+    Storage.saveSelectedSkin(skinId);
+    changed = true;
+  }
+  if (profile.settings && Object.keys(profile.settings).length) {
+    Object.assign(settings, profile.settings);
+    Storage.saveSettings(settings);
+    engine.audio.setVolume(settings.volume);
+    engine.audio.setMuted(settings.muted);
+    changed = true;
+  }
+
+  void refreshUnlocksCloud();
+  if (changed && (activeScreen === 'main' || activeScreen === 'settings' || activeScreen === 'skins')) {
+    screenEl.innerHTML = renderScreen(activeScreen);
+  }
+});
