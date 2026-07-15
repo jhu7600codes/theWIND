@@ -19,8 +19,20 @@ export class ValueNoise {
   }
 }
 
+/** Integer bit-mixing hash (avalanches fully, unlike one LCG step) — used to
+ *  scramble arithmetic-progression seeds like `base + i * 97` before they
+ *  feed the LCG below, since consecutive raw seeds would otherwise produce
+ *  near-linear (badly correlated) first outputs. */
+function hashInt(n: number): number {
+  let x = n | 0;
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+  x = x ^ (x >>> 16);
+  return x >>> 0;
+}
+
 export function seededRandom(seed: number): () => number {
-  let s = seed % 2147483647;
+  let s = hashInt(seed) % 2147483647;
   if (s <= 0) s += 2147483646;
   return () => {
     s = (s * 16807) % 2147483647;
