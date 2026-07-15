@@ -102,25 +102,26 @@ export class GameLoop {
   }
 
   private renderTouchOverlay(): void {
-    const joy = this.engine.input.joystickVisual;
-    if (!joy) return;
-    const { ctx } = this.engine;
+    const zone = this.engine.input.touchZoneActive;
+    if (!zone) return;
+    const { ctx, width, height } = this.engine;
+    const halfW = width / 2;
+    const midY = height / 2;
+    const zoneW = halfW / 2;
     ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(joy.originX, joy.originY, 46, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.16;
     ctx.fillStyle = '#fff';
-    const dx = joy.curX - joy.originX;
-    const dy = joy.curY - joy.originY;
-    const len = Math.min(46, Math.hypot(dx, dy));
-    const ang = Math.atan2(dy, dx);
+    ctx.fillRect(zone.col === 0 ? 0 : zoneW, zone.row === 0 ? 0 : midY, zoneW, midY);
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
     ctx.beginPath();
-    ctx.arc(joy.originX + Math.cos(ang) * len, joy.originY + Math.sin(ang) * len, 18, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(zoneW, 0);
+    ctx.lineTo(zoneW, height);
+    ctx.moveTo(0, midY);
+    ctx.lineTo(halfW, midY);
+    ctx.stroke();
     ctx.restore();
   }
 }

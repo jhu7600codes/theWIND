@@ -9,13 +9,9 @@ const SCHEME_KEYS: Record<Exclude<ControlScheme, `touch-${string}`>, { up: strin
 
 interface TouchZone {
   id: number;
-  originX: number;
-  originY: number;
   curX: number;
   curY: number;
 }
-
-const JOY_RADIUS = 55;
 
 export class InputManager {
   private keys = new Set<string>();
@@ -26,7 +22,6 @@ export class InputManager {
   private mouseDelta: Vec2 = { x: 0, y: 0 };
   private lastMouse: Vec2 | null = null;
   public touchActive = false;
-  public touchVisual: { originX: number; originY: number; curX: number; curY: number } | null = null;
 
   constructor(el: HTMLElement) {
     window.addEventListener('keydown', (e) => {
@@ -45,7 +40,7 @@ export class InputManager {
     el.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') {
         const half = e.clientX < window.innerWidth / 2;
-        const zone: TouchZone = { id: e.pointerId, originX: e.clientX, originY: e.clientY, curX: e.clientX, curY: e.clientY };
+        const zone: TouchZone = { id: e.pointerId, curX: e.clientX, curY: e.clientY };
         if (half && !this.touch) {
           this.touch = zone;
           this.touchActive = true;
@@ -87,16 +82,12 @@ export class InputManager {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  /** Movement axis for a given control scheme, combining keyboard + (for touch-a) the virtual joystick. -1..1 per axis. */
+  /** Movement axis for a given control scheme, combining keyboard + (for touch-a) the held touch quadrant. -1..1 per axis. */
   getAxis(scheme: ControlScheme): Vec2 {
     if (scheme.startsWith('touch')) {
-      if (!this.touch) return { x: 0, y: 0 };
-      const dx = this.touch.curX - this.touch.originX;
-      const dy = this.touch.curY - this.touch.originY;
-      const len = Math.hypot(dx, dy);
-      const clamped = Math.min(len, JOY_RADIUS) / JOY_RADIUS;
-      if (len < 1) return { x: 0, y: 0 };
-      return { x: (dx / len) * clamped, y: (dy / len) * clamped };
+      const zone = this.touchZoneActive;
+      if (!zone) return { x: 0, y: 0 };
+      return { x: (zone.col === 0 ? -1 : 1) * Math.SQRT1_2, y: (zone.row === 0 ? -1 : 1) * Math.SQRT1_2 };
     }
     const map = SCHEME_KEYS[scheme as Exclude<ControlScheme, `touch-${string}`>];
     if (!map) return { x: 0, y: 0 };
@@ -137,10 +128,21 @@ export class InputManager {
     return false;
   }
 
-  /** Current joystick visual position for HUD rendering, or null if inactive. */
-  get joystickVisual(): { originX: number; originY: number; curX: number; curY: number } | null {
+  /**
+   * Which of the 4 movement touch zones is currently held, or null if none.
+   * Zones tile the left half of the screen in a 2x2 grid: col 0/1 = left/right
+   * half of that region, row 0/1 = top/bottom half — so each zone is a
+   * discrete diagonal direction (top-left = up+left, etc), recomputed live
+   * from the touch's current position so sliding across zones updates it.
+   */
+  get touchZoneActive(): { col: 0 | 1; row: 0 | 1 } | null {
     if (!this.touch) return null;
-    return { originX: this.touch.originX, originY: this.touch.originY, curX: this.touch.curX, curY: this.touch.curY };
+    const halfW = window.innerWidth / 2;
+    const midY = window.innerHeight / 2;
+    return {
+      col: this.touch.curX < halfW / 2 ? 0 : 1,
+      row: this.touch.curY < midY ? 0 : 1,
+    };
   }
 
   endFrame(): void {
