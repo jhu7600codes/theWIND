@@ -7,6 +7,11 @@ export const WARNING_CEILING_Y = -1250;
 
 const BUILDING_SEG = 240;
 const CLOUD_SEG = 420;
+/** World-px radius around x=0 (the bag's fixed spawn point) kept permanently
+ *  clear of buildings, so a run can never end from an unavoidable spawn
+ *  directly inside/against one — that was pure bad luck before, independent
+ *  of anything the player did. */
+const SPAWN_SAFE_RADIUS = 260;
 
 interface Building {
   x: number;
@@ -79,6 +84,8 @@ export class World {
     const endIdx = Math.ceil(maxX / BUILDING_SEG) + 1;
     const out: Building[] = [];
     for (let i = startIdx; i <= endIdx; i++) {
+      const segStart = i * BUILDING_SEG;
+      if (segStart + BUILDING_SEG > -SPAWN_SAFE_RADIUS && segStart < SPAWN_SAFE_RADIUS) continue;
       const rand = seededRandom(this.seed + i * 97 + 1);
       if (rand() < 0.35) continue; // gap between buildings
       out.push(this.getBuilding(i));
