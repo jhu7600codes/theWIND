@@ -101,26 +101,33 @@ export class GameLoop {
     this.mode = null;
   }
 
+  /** Human Mode reuses the same touch pointer for camera-aim dragging, not movement zones — skip the grid there. */
   private renderTouchOverlay(): void {
-    const joy = this.engine.input.joystickVisual;
-    if (!joy) return;
-    const { ctx } = this.engine;
+    if (this.mode?.id === 'human') return;
+    const zone = this.engine.input.touchZoneActive;
+    if (!zone) return;
+    const { ctx, width, height } = this.engine;
+    const colLeft = width / 6;
+    const colRight = (width * 5) / 6;
+    const midY = height / 2;
     ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(joy.originX, joy.originY, 46, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 0.16;
     ctx.fillStyle = '#fff';
-    const dx = joy.curX - joy.originX;
-    const dy = joy.curY - joy.originY;
-    const len = Math.min(46, Math.hypot(dx, dy));
-    const ang = Math.atan2(dy, dx);
+    const cellX = zone.col === 0 ? 0 : zone.col === 1 ? colLeft : colRight;
+    const cellW = zone.col === 1 ? colRight - colLeft : colLeft;
+    ctx.fillRect(cellX, zone.row === 0 ? 0 : midY, cellW, midY);
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
     ctx.beginPath();
-    ctx.arc(joy.originX + Math.cos(ang) * len, joy.originY + Math.sin(ang) * len, 18, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(colLeft, 0);
+    ctx.lineTo(colLeft, height);
+    ctx.moveTo(colRight, 0);
+    ctx.lineTo(colRight, height);
+    ctx.moveTo(0, midY);
+    ctx.lineTo(width, midY);
+    ctx.stroke();
     ctx.restore();
   }
 }
