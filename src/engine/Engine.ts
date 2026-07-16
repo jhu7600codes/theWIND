@@ -101,26 +101,32 @@ export class GameLoop {
     this.mode = null;
   }
 
+  /** Human Mode reuses the same touch pointer for camera-aim dragging, not movement zones — skip the grid there. */
   private renderTouchOverlay(): void {
+    if (this.mode?.id === 'human') return;
     const zone = this.engine.input.touchZoneActive;
     if (!zone) return;
     const { ctx, width, height } = this.engine;
-    const halfW = width / 2;
+    const colLeft = width / 6;
+    const colRight = (width * 5) / 6;
     const midY = height / 2;
-    const zoneW = halfW / 2;
     ctx.save();
     ctx.globalAlpha = 0.16;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(zone.col === 0 ? 0 : zoneW, zone.row === 0 ? 0 : midY, zoneW, midY);
+    const cellX = zone.col === 0 ? 0 : zone.col === 1 ? colLeft : colRight;
+    const cellW = zone.col === 1 ? colRight - colLeft : colLeft;
+    ctx.fillRect(cellX, zone.row === 0 ? 0 : midY, cellW, midY);
     ctx.globalAlpha = 0.35;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 8]);
     ctx.beginPath();
-    ctx.moveTo(zoneW, 0);
-    ctx.lineTo(zoneW, height);
+    ctx.moveTo(colLeft, 0);
+    ctx.lineTo(colLeft, height);
+    ctx.moveTo(colRight, 0);
+    ctx.lineTo(colRight, height);
     ctx.moveTo(0, midY);
-    ctx.lineTo(halfW, midY);
+    ctx.lineTo(width, midY);
     ctx.stroke();
     ctx.restore();
   }

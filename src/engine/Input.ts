@@ -13,11 +13,15 @@ interface TouchZone {
   curY: number;
 }
 
+/** Column boundaries as a fraction of screen width: edges are narrow dedicated
+ *  left/right zones, the wide middle column is split top/bottom for up/down. */
+const COL_LEFT_EDGE = 1 / 6;
+const COL_RIGHT_EDGE = 5 / 6;
+
 export class InputManager {
   private keys = new Set<string>();
   private keysPressedEdge = new Set<string>();
   private touch: TouchZone | null = null;
-  private aimTouch: TouchZone | null = null;
   private mouseDown = false;
   private mouseDelta: Vec2 = { x: 0, y: 0 };
   private lastMouse: Vec2 | null = null;
@@ -33,19 +37,14 @@ export class InputManager {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.touch = null;
-      this.aimTouch = null;
       this.touchActive = false;
     });
 
     el.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') {
-        const half = e.clientX < window.innerWidth / 2;
-        const zone: TouchZone = { id: e.pointerId, curX: e.clientX, curY: e.clientY };
-        if (half && !this.touch) {
-          this.touch = zone;
+        if (!this.touch) {
+          this.touch = { id: e.pointerId, curX: e.clientX, curY: e.clientY };
           this.touchActive = true;
-        } else if (!this.aimTouch) {
-          this.aimTouch = zone;
         }
       } else {
         this.mouseDown = true;
@@ -54,14 +53,10 @@ export class InputManager {
     });
     el.addEventListener('pointermove', (e) => {
       if (this.touch && e.pointerId === this.touch.id) {
+        this.mouseDelta.x += e.clientX - this.touch.curX;
+        this.mouseDelta.y += e.clientY - this.touch.curY;
         this.touch.curX = e.clientX;
         this.touch.curY = e.clientY;
-      }
-      if (this.aimTouch && e.pointerId === this.aimTouch.id) {
-        this.mouseDelta.x += e.clientX - this.aimTouch.curX;
-        this.mouseDelta.y += e.clientY - this.aimTouch.curY;
-        this.aimTouch.curX = e.clientX;
-        this.aimTouch.curY = e.clientY;
       }
       if (this.mouseDown && this.lastMouse) {
         this.mouseDelta.x += e.clientX - this.lastMouse.x;
@@ -74,7 +69,6 @@ export class InputManager {
         this.touch = null;
         this.touchActive = false;
       }
-      if (this.aimTouch && e.pointerId === this.aimTouch.id) this.aimTouch = null;
       if (e.pointerType !== 'touch') this.mouseDown = false;
     };
     el.addEventListener('pointerup', clear);
@@ -82,12 +76,14 @@ export class InputManager {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  /** Movement axis for a given control scheme, combining keyboard + (for touch-a) the held touch quadrant. -1..1 per axis. */
+  /** Movement axis for a given control scheme, combining keyboard + (for touch-a) the held touch zone. -1..1 per axis. */
   getAxis(scheme: ControlScheme): Vec2 {
     if (scheme.startsWith('touch')) {
       const zone = this.touchZoneActive;
       if (!zone) return { x: 0, y: 0 };
-      return { x: (zone.col === 0 ? -1 : 1) * Math.SQRT1_2, y: (zone.row === 0 ? -1 : 1) * Math.SQRT1_2 };
+      if (zone.col === 0) return { x: -1, y: 0 };
+      if (zone.col === 2) return { x: 1, y: 0 };
+      return { x: 0, y: zone.row === 0 ? -1 : 1 };
     }
     const map = SCHEME_KEYS[scheme as Exclude<ControlScheme, `touch-${string}`>];
     if (!map) return { x: 0, y: 0 };
@@ -104,7 +100,7 @@ export class InputManager {
     return { x, y };
   }
 
-  /** Free-look delta since last call (mouse drag / touch drag on the non-movement half of the screen), resets each read. */
+  /** Free-look delta since last call (mouse drag, or touch drag — for modes that don't use the movement touch zones, like Human Mode's camera aim), resets each read. */
   consumeAim(): Vec2 {
     const d = this.mouseDelta;
     this.mouseDelta = { x: 0, y: 0 };
@@ -129,20 +125,18 @@ export class InputManager {
   }
 
   /**
-   * Which of the 4 movement touch zones is currently held, or null if none.
-   * Zones tile the left half of the screen in a 2x2 grid: col 0/1 = left/right
-   * half of that region, row 0/1 = top/bottom half — so each zone is a
-   * discrete diagonal direction (top-left = up+left, etc), recomputed live
-   * from the touch's current position so sliding across zones updates it.
+   * Which movement touch zone is currently held, or null if none. The screen
+   * tiles into 3 columns x 2 rows: the narrow left/right edge columns are
+   * each one dedicated zone (bank left / bank right, either row), and the
+   * wide middle column splits top/bottom into up/down. Recomputed live from
+   * the touch's current position, so sliding across zones updates it.
    */
-  get touchZoneActive(): { col: 0 | 1; row: 0 | 1 } | null {
+  get touchZoneActive(): { col: 0 | 1 | 2; row: 0 | 1 } | null {
     if (!this.touch) return null;
-    const halfW = window.innerWidth / 2;
-    const midY = window.innerHeight / 2;
-    return {
-      col: this.touch.curX < halfW / 2 ? 0 : 1,
-      row: this.touch.curY < midY ? 0 : 1,
-    };
+    const w = window.innerWidth;
+    const col = this.touch.curX < w * COL_LEFT_EDGE ? 0 : this.touch.curX > w * COL_RIGHT_EDGE ? 2 : 1;
+    const row = this.touch.curY < window.innerHeight / 2 ? 0 : 1;
+    return { col, row };
   }
 
   endFrame(): void {

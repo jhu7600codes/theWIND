@@ -17,7 +17,7 @@ export const MODE_META: Record<ModeId, { title: string; blurb: string; icon: str
 
 export const TUTORIALS: Record<ModeId, TutorialStep[]> = {
   normal: [
-    { title: 'You are the wind\'s passenger', body: 'Move with WASD, arrow keys, or touch: hold a corner of the left half of the screen (top-left, top-right, bottom-left, bottom-right) to fly that way. Up catches more wind and lifts you; down dives.' },
+    { title: 'You are the wind\'s passenger', body: 'Move with WASD, arrow keys, or touch: the screen edges bank left/right, the wide middle strip climbs (top half) or dives (bottom half). Lifting catches more wind; diving drops you.' },
     { title: 'Stay out of trouble', body: "Touching the ground or a building ends the run. Flap around too erratically and you'll spook people below — also game over." },
     { title: "Don't fly too high", body: 'Climb too close to the clouds and you risk getting pulled into a passing plane engine. Watch the red warning bar.' },
     { title: 'Score', body: 'Score is distance survived. Weather (rain, gusts) makes it harder — and more fun.' },
@@ -26,7 +26,7 @@ export const TUTORIALS: Record<ModeId, TutorialStep[]> = {
     { title: 'Just drift', body: 'Same controls as Normal mode, but there are no buildings, no humans, no planes, and no way to lose. Pure chill flight.' },
   ],
   bird: [
-    { title: 'You are the bird', body: 'Fly with WASD / arrows / touch zones (hold a corner of the left half of the screen) and chase the drifting paper bag.' },
+    { title: 'You are the bird', body: 'Fly with WASD / arrows / touch zones (screen edges bank left/right, middle strip climbs/dives) and chase the drifting paper bag.' },
     { title: 'Snatch it', body: 'Fly into the bag to catch it — a new one spawns immediately after. Keep the streak going!' },
   ],
   human: [
